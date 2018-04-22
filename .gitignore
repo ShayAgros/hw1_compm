@@ -1,0 +1,6 @@
+*.o
+*.swp
+tags
+cscope.out
+*.pdf
+sim_main
