@@ -5,14 +5,17 @@
 #include <string.h>
 
 #define DEBUG(msg,args...); printf(msg,args);
+//#define DEBUG(msg,args...);
 
 // declerations
 void update_latch(SIM_cmd *cmd, pipeStage state);
+void fetch_registers(SIM_cmd *cmd);
 
 int pc;
 int regFile[SIM_REGFILE_SIZE];
 PipeStageState p_letch[SIM_PIPELINE_DEPTH];
-
+int32_t wb_value[SIM_PIPELINE_DEPTH];
+int stall_cycles;
 
 
 // updates a pipe's latch.
@@ -22,35 +25,41 @@ void update_latch(SIM_cmd *cmd, pipeStage state) {
     memcpy(&p_letch[state].cmd,cmd,sizeof(SIM_cmd));
 }
 
-int do_minus(int src1, int src2) {
+int32_t do_minus(int32_t src1, int32_t src2) {
     return src1 - src2;
 }
-int do_plus(int src1, int src2) {
+int32_t do_plus(int32_t src1, int32_t src2) {
     return src1 + src2;
 }
 
-// TODO 1)add verification that r0 is no being assigned
+// TODO 1) add verification that r0 is no being assigned
 //	2) add support for any kind of execution delay 
-void do_arithmetic(SIM_cmd *cmd) {
-	int src1,src2;
+void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 	int (*arithmetic_func)(int,int);
 	
 	if(cmd->opcode == CMD_ADD || cmd->opcode == CMD_ADDI)
 	    arithmetic_func = &do_plus;  
 	else
 	    arithmetic_func = &do_minus;
-	
-	src1 = regFile[cmd->src1];
 
-	if ( cmd->isSrc2Imm )
-	    src2 = cmd->src2;
-	else
-	    src2 = regFile[cmd->src2];
+	wb_value[MEMORY] = arithmetic_func((int32_t)src1,src2);
 
-	regFile[cmd->dst] = arithmetic_func(src1,src2);
+	DEBUG("EXECUTE:calculated value for register %d. Its new val wiil be %d."
+		" arguments: arg1:%d arg2:%d\n",cmd->dst,wb_value[MEMORY],src1,src2);
+}
 
-	DEBUG("EXECUTE:calculated value for register %d. Its new val wiil be %d\n",cmd->dst,
-		regFile[cmd->dst]);
+// TODO 1) add forwarding support
+void fetch_registers(SIM_cmd *cmd) {
+
+    p_letch[EXECUTE].src1Val = regFile[cmd->src1];
+    p_letch[EXECUTE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
+					regFile[cmd->src2];
+    DEBUG("DECODE: fetched registers r1:%d and r2:%d with the "
+	    "values of val1:%d val2:%d\n",cmd->src1,
+	    				cmd->src2,
+					p_letch[EXECUTE].src1Val,
+					p_letch[EXECUTE].src2Val);
+
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -61,6 +70,7 @@ void do_arithmetic(SIM_cmd *cmd) {
   - The value of IF is the instuction in address 0x0
   \returns 0 on success. <0 in case of initialization failure.
 */
+// TODO reset all the variables you have
 int SIM_CoreReset(void) {
     pc=0;
     return 0;
@@ -86,6 +96,19 @@ void decode_tick() {
 	return;
     SIM_cmd *cmd = &p_letch[DECODE].cmd;
 
+    switch(cmd->opcode) {
+	// commands that don't use registers
+	case CMD_BR:
+	case CMD_HALT:
+	    break;
+	// the rest of 'em
+	default: 
+	    fetch_registers(cmd);
+	    break;
+    }
+
+    /* we zero to command to in case of stall */
+    cmd->opcode = CMD_NOP;
     update_latch(cmd,EXECUTE);
     return;
 }
@@ -94,19 +117,23 @@ void exe_tick() {
     if( p_letch[EXECUTE].cmd.opcode == CMD_NOP )
 	return;
 
-    SIM_cmd *cmd = &p_letch[DECODE].cmd;
+    SIM_cmd *cmd = &p_letch[EXECUTE].cmd;
 
     switch(cmd->opcode) {
 	case CMD_ADD:
 	case CMD_SUB:
 	case CMD_ADDI:
 	case CMD_SUBI:
-	    do_arithmetic(cmd);
+	    int src1 = p_letch[EXECUTE].src1Val;
+	    int32_t src2 = p_letch[EXECUTE].src2Val;
+	    do_arithmetic(cmd,src1,src2);
+	    break;
 	/* nothing to do for the other command here */
-	default: break;
     }
 
-    update_latch(cmd,EXECUTE);
+    /* we zero to command to in case of stall */
+    cmd->opcode = CMD_NOP;
+    update_latch(cmd,MEMORY);
     return;
 }
 
@@ -132,10 +159,17 @@ void wb_tick() {
 */
 void SIM_CoreClkTick() {
 
-    // we execute the pipe "from end to start"
+    // we execute the pipe "from end to beginning"
     wb_tick();
     mem_tick();
     exe_tick();
+
+    // stall mechanism
+    if(stall_cycles > 0){
+	stall_cycles--;
+	return;
+    }
+
     decode_tick();
     if_tick();
 
