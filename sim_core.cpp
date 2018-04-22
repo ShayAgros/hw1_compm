@@ -2,17 +2,56 @@
 /* This file should hold your implementation of the CPU pipeline core simulator */
 
 #include "sim_api.h"
+#include <string.h>
 
-typedef enum {
-	IF = 0,
-	REG,
-	EXE,
-	MEM,
-	WB
-} machine_state;
+#define DEBUG(msg,args...); printf(msg,args);
+
+// declerations
+void update_latch(SIM_cmd *cmd, pipeStage state);
 
 int pc;
-SIM_cmd p_letch[SIM_PIPELINE_DEPTH];
+int regFile[SIM_REGFILE_SIZE];
+PipeStageState p_letch[SIM_PIPELINE_DEPTH];
+
+
+
+// updates a pipe's latch.
+// @cmd = the command to be processed by the stage
+// @ state = the state whose letch is altered
+void update_latch(SIM_cmd *cmd, pipeStage state) {
+    memcpy(&p_letch[state].cmd,cmd,sizeof(SIM_cmd));
+}
+
+int do_minus(int src1, int src2) {
+    return src1 - src2;
+}
+int do_plus(int src1, int src2) {
+    return src1 + src2;
+}
+
+// TODO 1)add verification that r0 is no being assigned
+//	2) add support for any kind of execution delay 
+void do_arithmetic(SIM_cmd *cmd) {
+	int src1,src2;
+	int (*arithmetic_func)(int,int);
+	
+	if(cmd->opcode == CMD_ADD || cmd->opcode == CMD_ADDI)
+	    arithmetic_func = &do_plus;  
+	else
+	    arithmetic_func = &do_minus;
+	
+	src1 = regFile[cmd->src1];
+
+	if ( cmd->isSrc2Imm )
+	    src2 = cmd->src2;
+	else
+	    src2 = regFile[cmd->src2];
+
+	regFile[cmd->dst] = arithmetic_func(src1,src2);
+
+	DEBUG("EXECUTE:calculated value for register %d. Its new val wiil be %d\n",cmd->dst,
+		regFile[cmd->dst]);
+}
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
   Use this API to initialize the processor core simulator's data structures.
@@ -28,43 +67,63 @@ int SIM_CoreReset(void) {
 }
 
 void if_tick() {
-    
+    SIM_cmd current_command;
 
-    SIM_MemInstRead(pc,&p_letch[IF]);
-    printf("command: %s src1: %d src2: %d\n",cmdStr[p_letch[IF].opcode],p_letch[IF].src1,p_letch[IF].src2);
-    printf("dst: %d\n\n",p_letch[IF].dst);
-    pc+=4;
+    SIM_MemInstRead(pc,&current_command);
 
+    DEBUG("IF_TICK:command: %s src1: %d src2: %d dst: %d\n\n",
+	    cmdStr[current_command.opcode],
+	    current_command.src1,
+	    current_command.src2,
+	    current_command.dst);
+
+    update_latch(&current_command,DECODE);
 }
 
-void reg_tick() {
+void decode_tick() {
     // we only had one command thus far
-    if(pc%4 < 1)
+    if ( p_letch[DECODE].cmd.opcode == CMD_NOP)
 	return;
-	// add implementation here
+    SIM_cmd *cmd = &p_letch[DECODE].cmd;
+
+    update_latch(cmd,EXECUTE);
     return;
 }
 
 void exe_tick() {
-    if(pc%4 < 2)
+    if( p_letch[EXECUTE].cmd.opcode == CMD_NOP )
 	return;
-	// add implementation here
+
+    SIM_cmd *cmd = &p_letch[DECODE].cmd;
+
+    switch(cmd->opcode) {
+	case CMD_ADD:
+	case CMD_SUB:
+	case CMD_ADDI:
+	case CMD_SUBI:
+	    do_arithmetic(cmd);
+	/* nothing to do for the other command here */
+	default: break;
+    }
+
+    update_latch(cmd,EXECUTE);
     return;
 }
 
 void mem_tick() {
-    // we only had one command thus far
-    if(pc%4 < 3)
+
+    if( p_letch[MEMORY].cmd.opcode == CMD_NOP )
 	return;
-	// add implementation here
+    // add implementation here
     return;
 }
 
 void wb_tick() {
-    // we only had one command thus far
-    if(pc%4 < 4)
+
+    // NOP is passing through
+    if( p_letch[WRITEBACK].cmd.opcode == CMD_NOP )
 	return;
-	// add implementation here
+
     return;
 }
 
@@ -73,11 +132,12 @@ void wb_tick() {
 */
 void SIM_CoreClkTick() {
 
-    if_tick();
-    reg_tick();
-    exe_tick();
-    mem_tick();
+    // we execute the pipe "from end to start"
     wb_tick();
+    mem_tick();
+    exe_tick();
+    decode_tick();
+    if_tick();
 
     pc+=4;
 }
