@@ -4,25 +4,46 @@
 #include "sim_api.h"
 #include <string.h>
 
+#define WAIT_CYCLE -1
 #define DEBUG(msg,args...); printf(msg,args);
 //#define DEBUG(msg,args...);
 
-// declerations
+// declarations
+void unstall_pipe();
+void stall_pipe(pipeStage stage);
 void update_latch(SIM_cmd *cmd, pipeStage state);
 void fetch_registers(SIM_cmd *cmd);
+void flush();
 
+int branch_compare;
 int pc;
 int regFile[SIM_REGFILE_SIZE];
-PipeStageState p_letch[SIM_PIPELINE_DEPTH];
+PipeStageState p_latch[SIM_PIPELINE_DEPTH];
 int32_t wb_value[SIM_PIPELINE_DEPTH];
-int stall_cycles;
+bool stalled[SIM_PIPELINE_DEPTH];
 
+
+void unstall_pipe() {
+	memset(stalled, 0, sizeof(stalled));
+}
+
+void stall_pipe(pipeStage stage) {
+	for (int i = 0; i <= stage; i++) {
+		stalled[i] = true;
+	}
+}
+
+void flush() {
+	for (int i = 0; i <= EXECUTE; i++) {
+		p_latch[i].cmd.opcode = CMD_NOP;
+	}
+}
 
 // updates a pipe's latch.
 // @cmd = the command to be processed by the stage
-// @ state = the state whose letch is altered
+// @ state = the state whose latch is altered
 void update_latch(SIM_cmd *cmd, pipeStage state) {
-    memcpy(&p_letch[state].cmd,cmd,sizeof(SIM_cmd));
+    memcpy(&p_latch[state].cmd,cmd,sizeof(SIM_cmd));
 }
 
 int32_t do_minus(int32_t src1, int32_t src2) {
@@ -37,10 +58,10 @@ int32_t do_plus(int32_t src1, int32_t src2) {
 void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 	int (*arithmetic_func)(int,int);
 	
-	if(cmd->opcode == CMD_ADD || cmd->opcode == CMD_ADDI)
-	    arithmetic_func = &do_plus;  
+	if(cmd->opcode == CMD_SUB || cmd->opcode == CMD_SUBI)
+		arithmetic_func = &do_minus; 
 	else
-	    arithmetic_func = &do_minus;
+		arithmetic_func = &do_plus;
 
 	wb_value[MEMORY] = arithmetic_func((int32_t)src1,src2);
 
@@ -50,16 +71,15 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 // TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
-
-    p_letch[EXECUTE].src1Val = regFile[cmd->src1];
-    p_letch[EXECUTE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
-					regFile[cmd->src2];
+	wb_value[EXECUTE] = regFile[cmd->dst];
+    p_latch[EXECUTE].src1Val = regFile[cmd->src1];
+    p_latch[EXECUTE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 : 
+		regFile[cmd->src2];
     DEBUG("DECODE: fetched registers r1:%d and r2:%d with the "
 	    "values of val1:%d val2:%d\n",cmd->src1,
 	    				cmd->src2,
-					p_letch[EXECUTE].src1Val,
-					p_letch[EXECUTE].src2Val);
-
+					p_latch[EXECUTE].src1Val,
+					p_latch[EXECUTE].src2Val);
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -77,8 +97,10 @@ int SIM_CoreReset(void) {
 }
 
 void if_tick() {
-    SIM_cmd current_command;
+	if (stalled[FETCH])
+		return;
 
+    SIM_cmd current_command;
     SIM_MemInstRead(pc,&current_command);
 
     DEBUG("IF_TICK:command: %s src1: %d src2: %d dst: %d\n\n",
@@ -88,13 +110,13 @@ void if_tick() {
 	    current_command.dst);
 
     update_latch(&current_command,DECODE);
+	pc += 4;
 }
 
 void decode_tick() {
-    // we only had one command thus far
-    if ( p_letch[DECODE].cmd.opcode == CMD_NOP)
-	return;
-    SIM_cmd *cmd = &p_letch[DECODE].cmd;
+    if (p_latch[DECODE].cmd.opcode == CMD_NOP || stalled[DECODE])
+		return;
+    SIM_cmd *cmd = &p_latch[DECODE].cmd;
 
     switch(cmd->opcode) {
 	// commands that don't use registers
@@ -107,51 +129,88 @@ void decode_tick() {
 	    break;
     }
 
-    /* we zero to command to in case of stall */
-    cmd->opcode = CMD_NOP;
     update_latch(cmd,EXECUTE);
+	/* We zero to command to in case of stall */
+	cmd->opcode = CMD_NOP;
     return;
 }
 
 void exe_tick() {
-    if( p_letch[EXECUTE].cmd.opcode == CMD_NOP )
-	return;
+    if (p_latch[EXECUTE].cmd.opcode == CMD_NOP || stalled[EXECUTE])
+		return;
 
-    SIM_cmd *cmd = &p_letch[EXECUTE].cmd;
+    SIM_cmd *cmd = &p_latch[EXECUTE].cmd;
 
+	int src1;
+	int32_t src2;
+
+	//TODO: possible addition for branch
     switch(cmd->opcode) {
 	case CMD_ADD:
 	case CMD_SUB:
 	case CMD_ADDI:
 	case CMD_SUBI:
-	    int src1 = p_letch[EXECUTE].src1Val;
-	    int32_t src2 = p_letch[EXECUTE].src2Val;
-	    do_arithmetic(cmd,src1,src2);
+	case CMD_LOAD:
+		src1 = p_latch[EXECUTE].src1Val;
+	    src2 = p_latch[EXECUTE].src2Val;
+	    do_arithmetic(cmd, src1, src2);
 	    break;
-	/* nothing to do for the other command here */
+	case CMD_STORE:
+		src1 = wb_value[EXECUTE];
+		src2 = p_latch[EXECUTE].src2Val;
+		do_arithmetic(cmd, src1, src2);
+	case CMD_BREQ:
+	case CMD_BRNEQ:
+		branch_compare = p_latch[EXECUTE].src1Val - p_latch[EXECUTE].src2Val;
+	case CMD_BR:
+		wb_value[MEMORY] = pc + wb_value[EXECUTE];
     }
 
-    /* we zero to command to in case of stall */
-    cmd->opcode = CMD_NOP;
     update_latch(cmd,MEMORY);
+	/* we zero to command to in case of stall */
+	cmd->opcode = CMD_NOP;
     return;
 }
 
 void mem_tick() {
+    if (p_latch[MEMORY].cmd.opcode == CMD_NOP)
+		return;
 
-    if( p_letch[MEMORY].cmd.opcode == CMD_NOP )
-	return;
-    // add implementation here
+	SIM_cmd *cmd = &p_latch[MEMORY].cmd;
+	uint32_t address = wb_value[MEMORY];
+	int32_t rd_val;
+
+	switch (cmd->opcode) {
+	case CMD_LOAD:
+		if (SIM_MemDataRead(address, &rd_val) == WAIT_CYCLE) {
+			stall_pipe(EXECUTE);
+			return;
+		}
+		else
+			unstall_pipe();
+	case CMD_STORE:
+		SIM_MemDataWrite(address, p_latch[MEMORY].src1Val);
+	case CMD_BREQ:
+		if (branch_compare == 0) {
+			goto do_branch;
+		}
+	case CMD_BRNEQ:
+		if (branch_compare != 0) {
+			goto do_branch;
+		}
+	case CMD_BR:
+	do_branch:
+		flush();
+		pc = wb_value[MEMORY];
+	}
+	update_latch(cmd, WRITEBACK);
+	cmd->opcode = CMD_NOP;
     return;
 }
 
 void wb_tick() {
-
-    // NOP is passing through
-    if( p_letch[WRITEBACK].cmd.opcode == CMD_NOP )
-	return;
-
-    return;
+    if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
+		return;
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
@@ -163,17 +222,8 @@ void SIM_CoreClkTick() {
     wb_tick();
     mem_tick();
     exe_tick();
-
-    // stall mechanism
-    if(stall_cycles > 0){
-	stall_cycles--;
-	return;
-    }
-
     decode_tick();
     if_tick();
-
-    pc+=4;
 }
 
 /*! SIM_CoreGetState: Return the current core (pipeline) internal state
