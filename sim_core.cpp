@@ -24,7 +24,7 @@ bool stalled[SIM_PIPELINE_DEPTH];
 
 
 void unstall_pipe() {
-	memset(stalled, 0, sizeof(stalled));
+	memset(stalled, 0, SIM_PIPELINE_DEPTH * sizeof(int));
 }
 
 void stall_pipe(pipeStage stage) {
@@ -53,8 +53,6 @@ int32_t do_plus(int32_t src1, int32_t src2) {
     return src1 + src2;
 }
 
-// TODO 1) add verification that r0 is no being assigned
-//	2) add support for any kind of execution delay 
 void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 	int (*arithmetic_func)(int,int);
 	
@@ -93,6 +91,11 @@ void fetch_registers(SIM_cmd *cmd) {
 // TODO reset all the variables you have
 int SIM_CoreReset(void) {
     pc=0;
+	memset(regFile, 0, SIM_REGFILE_SIZE * sizeof(int));
+	memset(stalled, 0, SIM_PIPELINE_DEPTH * sizeof(bool));
+	memset(wb_value, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
+	memset(p_latch, 0, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
+	branch_compare = 0;
     return 0;
 }
 
@@ -186,8 +189,10 @@ void mem_tick() {
 			stall_pipe(EXECUTE);
 			return;
 		}
-		else
+		else {
 			unstall_pipe();
+			wb_value[WRITEBACK] = rd_val;
+		}
 	case CMD_STORE:
 		SIM_MemDataWrite(address, p_latch[MEMORY].src1Val);
 	case CMD_BREQ:
@@ -202,6 +207,9 @@ void mem_tick() {
 	do_branch:
 		flush();
 		pc = wb_value[MEMORY];
+	default:
+		// pass the value onward
+		wb_value[WRITEBACK] = wb_value[MEMORY];
 	}
 	update_latch(cmd, WRITEBACK);
 	cmd->opcode = CMD_NOP;
@@ -211,6 +219,17 @@ void mem_tick() {
 void wb_tick() {
     if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
 		return;
+	int dst;
+	SIM_cmd *cmd = &p_latch[WRITEBACK].cmd;
+	switch(cmd->opcode)
+	case CMD_ADD:
+	case CMD_ADDI:
+	case CMD_SUB:
+	case CMD_SUBI:
+	case CMD_LOAD:
+		dst = p_latch[WRITEBACK].cmd.dst;
+		if (dst != 0)
+			regFile[dst] = wb_value[WRITEBACK];
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
@@ -231,5 +250,8 @@ void SIM_CoreClkTick() {
     The function will return the state of the pipe at the end of a cycle
 */
 void SIM_CoreGetState(SIM_coreState *curState) {
+	curState->pc = pc;
+	memcpy(curState->regFile, regFile, SIM_REGFILE_SIZE * sizeof(int32_t));
+	memcpy(curState->pipeStageState, p_latch, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
+	SIM_MemInstRead(pc, &curState->pipeStageState[FETCH].cmd);
 }
-
