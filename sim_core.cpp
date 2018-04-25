@@ -1,6 +1,13 @@
 /* 046267 Computer Architecture - Spring 2017 - HW #1 */
 /* This file should hold your implementation of the CPU pipeline core simulator */
 
+// TODO:
+// Stall works fine, but there are still some problems
+// with the register value update (the value isn't always right
+// in calculating the address to write to with LOAD) and the branch
+// operation isn't good (the next command loaded isn't a good one)
+
+
 #include "sim_api.h"
 #include <string.h>
 
@@ -9,34 +16,51 @@
 //#define DEBUG(msg,args...);
 
 // declarations
-void unstall_pipe();
-void stall_pipe(pipeStage stage);
 void update_latch(SIM_cmd *cmd, pipeStage state);
 void fetch_registers(SIM_cmd *cmd);
 void flush();
+bool is_data_hazard(SIM_cmd *cmd);
+
+// structs
+typedef enum {
+	ES_OKAY,
+	ES_DELAY
+} PipeExectutionState;
+
 
 int branch_compare;
 int pc;
 int regFile[SIM_REGFILE_SIZE];
 PipeStageState p_latch[SIM_PIPELINE_DEPTH];
 int32_t wb_value[SIM_PIPELINE_DEPTH];
-bool stalled[SIM_PIPELINE_DEPTH];
 
-
-void unstall_pipe() {
-	memset(stalled, 0, SIM_PIPELINE_DEPTH * sizeof(int));
-}
-
-void stall_pipe(pipeStage stage) {
-	for (int i = 0; i <= stage; i++) {
-		stalled[i] = true;
-	}
-}
 
 void flush() {
-	for (int i = 0; i <= EXECUTE; i++) {
-		p_latch[i].cmd.opcode = CMD_NOP;
-	}
+    for (int i = 0; i <= EXECUTE; i++) {
+	p_latch[i].cmd.opcode = CMD_NOP;
+    }
+}
+
+/* the function checks for data hazard */
+bool is_data_hazard(SIM_cmd *cmd) {
+
+    SIM_cmd *exe;
+    bool data_hazard = false;
+    
+    switch (cmd->opcode) {
+	case CMD_ADD:
+	case CMD_ADDI:
+	case CMD_SUB:
+	case CMD_SUBI:
+	case CMD_LOAD:
+	    for (int i=(int)EXECUTE; i<= (int)WRITEBACK ;i++) {
+		exe = &p_latch[i].cmd;
+		data_hazard |= (cmd->src1 == exe->dst);
+		data_hazard |= (!cmd->isSrc2Imm & cmd->src2 == exe->dst);
+	    }
+    }
+
+    return data_hazard;
 }
 
 // updates a pipe's latch.
@@ -69,7 +93,7 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 // TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
-	wb_value[EXECUTE] = regFile[cmd->dst];
+    wb_value[EXECUTE] = regFile[cmd->dst];
     p_latch[EXECUTE].src1Val = regFile[cmd->src1];
     p_latch[EXECUTE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 : 
 		regFile[cmd->src2];
@@ -92,16 +116,13 @@ void fetch_registers(SIM_cmd *cmd) {
 int SIM_CoreReset(void) {
     pc=0;
 	memset(regFile, 0, SIM_REGFILE_SIZE * sizeof(int));
-	memset(stalled, 0, SIM_PIPELINE_DEPTH * sizeof(bool));
 	memset(wb_value, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
 	memset(p_latch, 0, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
 	branch_compare = 0;
     return 0;
 }
 
-void if_tick() {
-	if (stalled[FETCH])
-		return;
+PipeExectutionState if_tick() {
 
     SIM_cmd current_command;
     SIM_MemInstRead(pc,&current_command);
@@ -113,12 +134,15 @@ void if_tick() {
 	    current_command.dst);
 
     update_latch(&current_command,DECODE);
-	pc += 4;
+    pc += 4;
+    return ES_OKAY;
 }
 
-void decode_tick() {
-    if (p_latch[DECODE].cmd.opcode == CMD_NOP || stalled[DECODE])
-		return;
+// TODO: add support for forwarding here
+// 	and fix the bug you have here (register file isn't updated
+PipeExectutionState decode_tick() {
+    if (p_latch[DECODE].cmd.opcode == CMD_NOP)
+		return ES_OKAY;
     SIM_cmd *cmd = &p_latch[DECODE].cmd;
 
     switch(cmd->opcode) {
@@ -128,19 +152,24 @@ void decode_tick() {
 	    break;
 	// the rest of 'em
 	default: 
+	   // if (is_data_hazard(cmd)) {
+	   //     
+	   //     return ES_OKAY;
+	   // } 
+	   // // we unstall FETCH just in case it was stalled by us
 	    fetch_registers(cmd);
 	    break;
     }
 
     update_latch(cmd,EXECUTE);
-	/* We zero to command to in case of stall */
-	cmd->opcode = CMD_NOP;
-    return;
+    /* We zero to command to in case of stall */
+    cmd->opcode = CMD_NOP;
+    return ES_OKAY;
 }
 
-void exe_tick() {
-    if (p_latch[EXECUTE].cmd.opcode == CMD_NOP || stalled[EXECUTE])
-		return;
+PipeExectutionState exe_tick() {
+    if (p_latch[EXECUTE].cmd.opcode == CMD_NOP )
+		return ES_OKAY;
 
     SIM_cmd *cmd = &p_latch[EXECUTE].cmd;
 
@@ -154,7 +183,7 @@ void exe_tick() {
 	case CMD_ADDI:
 	case CMD_SUBI:
 	case CMD_LOAD:
-		src1 = p_latch[EXECUTE].src1Val;
+	    src1 = p_latch[EXECUTE].src1Val;
 	    src2 = p_latch[EXECUTE].src2Val;
 	    do_arithmetic(cmd, src1, src2);
 	    break;
@@ -162,6 +191,7 @@ void exe_tick() {
 		src1 = wb_value[EXECUTE];
 		src2 = p_latch[EXECUTE].src2Val;
 		do_arithmetic(cmd, src1, src2);
+		break;
 	case CMD_BREQ:
 	case CMD_BRNEQ:
 		branch_compare = p_latch[EXECUTE].src1Val - p_latch[EXECUTE].src2Val;
@@ -170,14 +200,14 @@ void exe_tick() {
     }
 
     update_latch(cmd,MEMORY);
-	/* we zero to command to in case of stall */
-	cmd->opcode = CMD_NOP;
-    return;
+    /* we zero to command to in case of stall */
+    cmd->opcode = CMD_NOP;
+    return ES_OKAY;
 }
 
-void mem_tick() {
+PipeExectutionState mem_tick() {
     if (p_latch[MEMORY].cmd.opcode == CMD_NOP)
-		return;
+		return ES_OKAY;
 
 	SIM_cmd *cmd = &p_latch[MEMORY].cmd;
 	uint32_t address = wb_value[MEMORY];
@@ -186,50 +216,57 @@ void mem_tick() {
 	switch (cmd->opcode) {
 	case CMD_LOAD:
 		if (SIM_MemDataRead(address, &rd_val) == WAIT_CYCLE) {
-			stall_pipe(EXECUTE);
-			return;
+			printf("MEMORY: read stall\n");
+			return ES_DELAY;
 		}
-		else {
-			unstall_pipe();
-			wb_value[WRITEBACK] = rd_val;
-		}
+		printf("MEMORY: value was read!\n");
+		wb_value[WRITEBACK] = rd_val;
+		break;
 	case CMD_STORE:
 		SIM_MemDataWrite(address, p_latch[MEMORY].src1Val);
+		break;
 	case CMD_BREQ:
 		if (branch_compare == 0) {
 			goto do_branch;
 		}
+		break;
 	case CMD_BRNEQ:
 		if (branch_compare != 0) {
 			goto do_branch;
 		}
+		break;
 	case CMD_BR:
 	do_branch:
 		flush();
 		pc = wb_value[MEMORY];
+		break;
 	default:
 		// pass the value onward
 		wb_value[WRITEBACK] = wb_value[MEMORY];
 	}
 	update_latch(cmd, WRITEBACK);
 	cmd->opcode = CMD_NOP;
-    return;
+	return ES_OKAY;
 }
 
-void wb_tick() {
+PipeExectutionState wb_tick() {
     if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
-		return;
+		return ES_OKAY;
 	int dst;
 	SIM_cmd *cmd = &p_latch[WRITEBACK].cmd;
-	switch(cmd->opcode)
+	switch(cmd->opcode) {
 	case CMD_ADD:
 	case CMD_ADDI:
 	case CMD_SUB:
 	case CMD_SUBI:
 	case CMD_LOAD:
-		dst = p_latch[WRITEBACK].cmd.dst;
-		if (dst != 0)
-			regFile[dst] = wb_value[WRITEBACK];
+	    dst = p_latch[WRITEBACK].cmd.dst;
+	    if (dst != 0)
+		regFile[dst] = wb_value[WRITEBACK];
+	}
+
+	cmd->opcode = CMD_NOP;
+	return ES_OKAY;
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
@@ -239,9 +276,14 @@ void SIM_CoreClkTick() {
 
     // we execute the pipe "from end to beginning"
     wb_tick();
-    mem_tick();
+
+    if(mem_tick() == ES_DELAY)
+	return;
+
     exe_tick();
-    decode_tick();
+
+    if(decode_tick() == ES_DELAY)
+	return;
     if_tick();
 }
 
