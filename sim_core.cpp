@@ -1,25 +1,54 @@
 /* 046267 Computer Architecture - Spring 2017 - HW #1 */
 /* This file should hold your implementation of the CPU pipeline core simulator */
 
-// TODO:
-// Stall works fine, but there are still some problems
-// with the register value update (the value isn't always right
-// in calculating the address to write to with LOAD) and the branch
-// operation isn't good (the next command loaded isn't a good one)
+//	When running example2.img
+//
+// TODO: Bug
+//
+//	Simulation on cycle 7. The state is:
+//	PC = 0xC
+//	Register file:
+//		R0 = 0x0 R1 = 0x0 R2 = 0x0 R3 = 0x0 R4 = 0x0 R5 = 0x0 R6 = 0x0 R7 = 0x0 R8 = 0x0 R9 = 0x0 R10 = 0x0 
+//		R11 = 0x0 R12 = 0x0 R13 = 0x0 R14 = 0x0 R15 = 0x0 R16 = 0x0 R17 = 0x0 R18 = 0x0 R19 = 0x0 R20 = 0x0 
+//		R21 = 0x0 R22 = 0x0 R23 = 0x0 R24 = 0x0 R25 = 0x0 R26 = 0x0 R27 = 0x0 R28 = 0x0 R29 = 0x0 R30 = 0x0 
+//		R31 = 0x0
+//	Command at each pipe stage:
+//		IF : BREQ $1 , $2(=0x0) , $3(=0x0)
+//		ID : LOAD $3 , $1(=0x0) , 12964(=0x0)
+//		EXE : NOP $0 , $0(=0x0) , $0(=0x0)
+//		MEM : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
+//		WB : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
+//	MEMORY: read stall
+//	DECODE: fetched registers r1:1 and r2:12964 with the values of val1:0 val2:0
+//
+//
+//	It shouldn't be able to proceed the DECODE function (because
+//	WRITEBACK hasn't wrote it yet, and there should be data_hazard
+//
+//
+//
+//	TODO: another bug:
+//	it looks like you can only branch forward. I can figure out
+//	the correct address they want us to branch to (if we actually
+//	add PC value, that the address can only grow, and we're not
+//	gonna be stuck in an infinite loop. This is something that
+//	need more clarification
 
 
 #include "sim_api.h"
 #include <string.h>
 
 #define WAIT_CYCLE -1
-#define DEBUG(msg,args...); printf(msg,args);
+#define DEBUG( ... ); printf( __VA_ARGS__ );
 //#define DEBUG(msg,args...);
 
 // declarations
-void update_latch(SIM_cmd *cmd, pipeStage state);
+void update_latch(SIM_cmd *cmd, pipeStage *state);
 void fetch_registers(SIM_cmd *cmd);
 void flush();
 bool is_data_hazard(SIM_cmd *cmd);
+void set_nop_opcode(PipeStageState *latch);
+bool find_reg_in_latch(int reg,PipeStageState &latch);
 
 // structs
 typedef enum {
@@ -37,27 +66,66 @@ int32_t wb_value[SIM_PIPELINE_DEPTH];
 
 void flush() {
     for (int i = 0; i <= EXECUTE; i++) {
-	p_latch[i].cmd.opcode = CMD_NOP;
+	set_nop_opcode(&p_latch[i]);
     }
 }
 
+void set_nop_opcode(PipeStageState *latch) {
+	memset(latch , 0, sizeof(PipeStageState));
+}
+
+// Checks weather the given letch is going to change
+// this register (also verifies that the latch has
+// a command that modifies anything)
+bool find_reg_in_latch(int reg,PipeStageState *latch) {
+    bool hazard = false;
+
+    switch( latch->cmd.opcode ) {
+    case CMD_ADD:
+    case CMD_SUB:
+    case CMD_ADDI:
+    case CMD_SUBI:
+    case CMD_LOAD:
+	hazard |= (reg == latch->cmd.dst);
+	break;
+    }
+    return hazard;
+}
+
+// TODO: check if its wouldn't be better to run for EXECUTE
+// to WRITEBACK (in case of forwarding, you need the newest value)
+// also, maybe there is a better way to implement this (though it does
+// need to know A LOT to have a good answer 
 /* the function checks for data hazard */
 bool is_data_hazard(SIM_cmd *cmd) {
 
     SIM_cmd *exe;
     bool data_hazard = false;
-    
-    switch (cmd->opcode) {
-	case CMD_ADD:
-	case CMD_ADDI:
-	case CMD_SUB:
-	case CMD_SUBI:
-	case CMD_LOAD:
-	    for (int i=(int)EXECUTE; i<= (int)WRITEBACK ;i++) {
-		exe = &p_latch[i].cmd;
-		data_hazard |= (cmd->src1 == exe->dst);
-		data_hazard |= (!cmd->isSrc2Imm & cmd->src2 == exe->dst);
-	    }
+
+    for (int i=(int)EXECUTE; i<= (int)WRITEBACK && !data_hazard ;i++) {
+   	 switch (cmd->opcode) {
+   	     case CMD_ADD:
+   	     case CMD_ADDI:
+   	     case CMD_SUB:
+   	     case CMD_SUBI:
+   	     case CMD_LOAD:
+   	         data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
+		 if (!cmd->isSrc2Imm)
+		     data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+   	         break;
+   	     case CMD_STORE:
+   	         data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
+		 if (!cmd->isSrc2Imm)
+		     data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+		 break;
+	     case CMD_BREQ:
+	     case CMD_BRNEQ:
+		 data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
+		 data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+		 /* fall through */
+	     case CMD_BR:
+		 data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
+	 }
     }
 
     return data_hazard;
@@ -66,8 +134,8 @@ bool is_data_hazard(SIM_cmd *cmd) {
 // updates a pipe's latch.
 // @cmd = the command to be processed by the stage
 // @ state = the state whose latch is altered
-void update_latch(SIM_cmd *cmd, pipeStage state) {
-    memcpy(&p_latch[state].cmd,cmd,sizeof(SIM_cmd));
+void update_latch(PipeStageState *dst_latch,PipeStageState *src_latch) {
+    memcpy(dst_latch,src_latch,sizeof(PipeStageState));
 }
 
 int32_t do_minus(int32_t src1, int32_t src2) {
@@ -79,9 +147,9 @@ int32_t do_plus(int32_t src1, int32_t src2) {
 
 void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 	int (*arithmetic_func)(int,int);
-	
+
 	if(cmd->opcode == CMD_SUB || cmd->opcode == CMD_SUBI)
-		arithmetic_func = &do_minus; 
+		arithmetic_func = &do_minus;
 	else
 		arithmetic_func = &do_plus;
 
@@ -93,15 +161,14 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 // TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
-    wb_value[EXECUTE] = regFile[cmd->dst];
-    p_latch[EXECUTE].src1Val = regFile[cmd->src1];
-    p_latch[EXECUTE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 : 
+    p_latch[DECODE].src1Val = regFile[cmd->src1];
+    p_latch[DECODE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
 		regFile[cmd->src2];
-    DEBUG("DECODE: fetched registers r1:%d and r2:%d with the "
-	    "values of val1:%d val2:%d\n",cmd->src1,
-	    				cmd->src2,
-					p_latch[EXECUTE].src1Val,
-					p_latch[EXECUTE].src2Val);
+    wb_value[EXECUTE] = regFile[cmd->dst];
+
+    DEBUG("DECODE: fetch values src1:0x%X src2:0x%X dst:%X\n",p_latch[DECODE].src1Val,
+	    						p_latch[DECODE].src2Val,
+							wb_value[EXECUTE]);
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -115,25 +182,25 @@ void fetch_registers(SIM_cmd *cmd) {
 // TODO reset all the variables you have
 int SIM_CoreReset(void) {
     pc=0;
-	memset(regFile, 0, SIM_REGFILE_SIZE * sizeof(int));
-	memset(wb_value, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
-	memset(p_latch, 0, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
-	branch_compare = 0;
+    memset(regFile, 0, SIM_REGFILE_SIZE * sizeof(int));
+    memset(wb_value, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
+    memset(p_latch, 0, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
+    branch_compare = 0;
     return 0;
 }
 
 PipeExectutionState if_tick() {
 
-    SIM_cmd current_command;
-    SIM_MemInstRead(pc,&current_command);
+    SIM_cmd *current_command = &p_latch[FETCH].cmd;
+    SIM_MemInstRead(pc,current_command);
 
-    DEBUG("IF_TICK:command: %s src1: %d src2: %d dst: %d\n\n",
-	    cmdStr[current_command.opcode],
-	    current_command.src1,
-	    current_command.src2,
-	    current_command.dst);
+    DEBUG("FETCH: command: %s src1: %d src2: %d dst: %d\n\n",
+	    cmdStr[current_command->opcode],
+	    current_command->src1,
+	    current_command->src2,
+	    current_command->dst);
 
-    update_latch(&current_command,DECODE);
+    update_latch(&p_latch[DECODE],&p_latch[FETCH]);
     pc += 4;
     return ES_OKAY;
 }
@@ -147,23 +214,22 @@ PipeExectutionState decode_tick() {
 
     switch(cmd->opcode) {
 	// commands that don't use registers
-	case CMD_BR:
 	case CMD_HALT:
 	    break;
 	// the rest of 'em
-	default: 
-	   // if (is_data_hazard(cmd)) {
-	   //     
-	   //     return ES_OKAY;
-	   // } 
-	   // // we unstall FETCH just in case it was stalled by us
+	default:
+	    if (is_data_hazard(cmd)) {
+		DEBUG("DECODE: data hazard detected\n");
+		return ES_DELAY;
+	    }
+
 	    fetch_registers(cmd);
 	    break;
     }
 
-    update_latch(cmd,EXECUTE);
+    update_latch(&p_latch[EXECUTE],&p_latch[DECODE]);
     /* We zero to command to in case of stall */
-    cmd->opcode = CMD_NOP;
+    set_nop_opcode(&p_latch[DECODE]);
     return ES_OKAY;
 }
 
@@ -199,9 +265,9 @@ PipeExectutionState exe_tick() {
 		wb_value[MEMORY] = pc + wb_value[EXECUTE];
     }
 
-    update_latch(cmd,MEMORY);
+    update_latch(&p_latch[MEMORY],&p_latch[EXECUTE]);
     /* we zero to command to in case of stall */
-    cmd->opcode = CMD_NOP;
+    set_nop_opcode(&p_latch[EXECUTE]);
     return ES_OKAY;
 }
 
@@ -216,10 +282,13 @@ PipeExectutionState mem_tick() {
 	switch (cmd->opcode) {
 	case CMD_LOAD:
 		if (SIM_MemDataRead(address, &rd_val) == WAIT_CYCLE) {
-			printf("MEMORY: read stall\n");
-			return ES_DELAY;
+			DEBUG("MEMORY: read stall\n");
+			// in case the previous stage is NOP, there is
+			// no point in stalling the pipe
+			return (p_latch[EXECUTE].cmd.opcode == CMD_NOP) ? 
+			    ES_OKAY : ES_DELAY;
 		}
-		printf("MEMORY: value was read!\n");
+		DEBUG("MEMORY: value was read from address %X!\n",address);
 		wb_value[WRITEBACK] = rd_val;
 		break;
 	case CMD_STORE:
@@ -239,13 +308,14 @@ PipeExectutionState mem_tick() {
 	do_branch:
 		flush();
 		pc = wb_value[MEMORY];
+		DEBUG("MEMORY: branch taken to address 0x%X\n",pc);
 		break;
 	default:
 		// pass the value onward
 		wb_value[WRITEBACK] = wb_value[MEMORY];
 	}
-	update_latch(cmd, WRITEBACK);
-	cmd->opcode = CMD_NOP;
+    	update_latch(&p_latch[WRITEBACK],&p_latch[MEMORY]);
+	set_nop_opcode(&p_latch[MEMORY]);
 	return ES_OKAY;
 }
 
@@ -265,7 +335,7 @@ PipeExectutionState wb_tick() {
 		regFile[dst] = wb_value[WRITEBACK];
 	}
 
-	cmd->opcode = CMD_NOP;
+	set_nop_opcode(&p_latch[WRITEBACK]);
 	return ES_OKAY;
 }
 
