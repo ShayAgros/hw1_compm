@@ -54,7 +54,6 @@ int main(int argc, char const *argv[]) {
     char const *simDurationStr = argv[2];
 
     SIM_coreState curState;
-
     if (argc < 3) {
             fprintf(stderr, "Usage: %s <memory image filename> <number of cycles to run> [-s|-f]\n", argv[0]);
         exit(1);
@@ -73,13 +72,11 @@ int main(int argc, char const *argv[]) {
         }
     }
 
-
     /* Initialized simulation modules */
     if (SIM_MemReset(memFname) != 0) {
         fprintf(stderr, "Failed initializing memory simulator!\n");
         exit(2);
     }
-
     printf("Resetting core...\n");
     if (SIM_CoreReset() != 0) {
         fprintf(stderr, "Failed resetting core!\n");
@@ -93,7 +90,6 @@ int main(int argc, char const *argv[]) {
                 simDurationStr);
         exit(4);
     }
-
     printf("Running simulation for %d cycles\n", simDuration);
     printf("Simulation on cycle %d. The state is:\n", 0);
     SIM_CoreGetState(&curState);
