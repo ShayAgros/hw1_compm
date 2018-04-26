@@ -1,36 +1,11 @@
 /* 046267 Computer Architecture - Spring 2017 - HW #1 */
 /* This file should hold your implementation of the CPU pipeline core simulator */
 
-//	When running example2.img
-//
-// TODO: Bug
-//
-//	Simulation on cycle 7. The state is:
-//	PC = 0xC
-//	Register file:
-//		R0 = 0x0 R1 = 0x0 R2 = 0x0 R3 = 0x0 R4 = 0x0 R5 = 0x0 R6 = 0x0 R7 = 0x0 R8 = 0x0 R9 = 0x0 R10 = 0x0 
-//		R11 = 0x0 R12 = 0x0 R13 = 0x0 R14 = 0x0 R15 = 0x0 R16 = 0x0 R17 = 0x0 R18 = 0x0 R19 = 0x0 R20 = 0x0 
-//		R21 = 0x0 R22 = 0x0 R23 = 0x0 R24 = 0x0 R25 = 0x0 R26 = 0x0 R27 = 0x0 R28 = 0x0 R29 = 0x0 R30 = 0x0 
-//		R31 = 0x0
-//	Command at each pipe stage:
-//		IF : BREQ $1 , $2(=0x0) , $3(=0x0)
-//		ID : LOAD $3 , $1(=0x0) , 12964(=0x0)
-//		EXE : NOP $0 , $0(=0x0) , $0(=0x0)
-//		MEM : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
-//		WB : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
-//	MEMORY: read stall
-//	DECODE: fetched registers r1:1 and r2:12964 with the values of val1:0 val2:0
-//
-//
-//	It shouldn't be able to proceed the DECODE function (because
-//	WRITEBACK hasn't wrote it yet, and there should be data_hazard
-
-
 #include "sim_api.h"
 #include <string.h>
 
 #define WAIT_CYCLE -1
-#define DEBUG( ... ); printf( __VA_ARGS__ );
+#define DEBUG( ... ); //printf( __VA_ARGS__ );
 //#define DEBUG(msg,args...);
 
 // declarations
@@ -161,8 +136,8 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 	wb_value[MEMORY] = arithmetic_func((int32_t)src1,src2);
 
-	//DEBUG("EXECUTE:calculated value for register %d. Its new val will be %d."
-	//	" arguments: arg1:%d arg2:%d\n",cmd->dst,wb_value[MEMORY],src1,src2);
+	DEBUG("EXECUTE:calculated value for register %d. Its new val will be %d."
+		" arguments: arg1:%d arg2:%d\n",cmd->dst,wb_value[MEMORY],src1,src2);
 }
 
 // TODO 1) add forwarding support
@@ -172,9 +147,9 @@ void fetch_registers(SIM_cmd *cmd) {
 		regFile[cmd->src2];
     wb_value[EXECUTE] = regFile[cmd->dst];
 
-    //DEBUG("DECODE: fetch values src1:0x%X src2:0x%X dst:%X\n",p_latch[DECODE].src1Val,
-	//    						p_latch[DECODE].src2Val,
-	//						wb_value[EXECUTE]);
+    DEBUG("DECODE: fetch values src1:0x%X src2:0x%X dst:%X\n",p_latch[DECODE].src1Val,
+	    						p_latch[DECODE].src2Val,
+							wb_value[EXECUTE]);
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -197,16 +172,18 @@ int SIM_CoreReset(void) {
 
 PipeExectutionState if_tick() {
 
+	// TODO: those two lines contradict themselves
     SIM_cmd *current_command = &p_latch[FETCH].cmd;
     SIM_MemInstRead(pc,current_command);
 
-    //DEBUG("FETCH: command: %s src1: %d src2: %d dst: %d\n\n",
-	//    cmdStr[current_command->opcode],
-	//    current_command->src1,
-	//    current_command->src2,
-	//    current_command->dst);
+	DEBUG("FETCH: command: %s src1: %d src2: %d dst: %d\n\n",
+	    cmdStr[current_command->opcode],
+	    current_command->src1,
+	    current_command->src2,
+	    current_command->dst);
 
     update_latch(&p_latch[DECODE],&p_latch[FETCH]);
+
     pc += 4;
     return ES_OKAY;
 }
@@ -225,7 +202,7 @@ PipeExectutionState decode_tick() {
 	// the rest of 'em
 	default:
 	    if (is_data_hazard(cmd)) {
-		//DEBUG("DECODE: data hazard detected\n");
+		DEBUG("DECODE: data hazard detected\n");
 		return ES_DELAY;
 	    }
 
@@ -234,7 +211,7 @@ PipeExectutionState decode_tick() {
     }
 
     update_latch(&p_latch[EXECUTE],&p_latch[DECODE]);
-    /* We zero to command to in case of stall */
+    /* We zero command in case of stall */
     set_nop_opcode(&p_latch[DECODE]);
     return ES_OKAY;
 }
@@ -289,7 +266,7 @@ PipeExectutionState mem_tick() {
 	switch (cmd->opcode) {
 	case CMD_LOAD:
 		if (SIM_MemDataRead(address, &rd_val) == WAIT_CYCLE) {
-			//DEBUG("MEMORY: read stall\n");
+			DEBUG("MEMORY: read stall\n");
 			return ES_DELAY;
 
 			/* 
@@ -304,7 +281,7 @@ PipeExectutionState mem_tick() {
 				ES_OKAY : ES_DELAY;
 			*/
 		}
-		//DEBUG("MEMORY: value was read from address %X!\n",address);
+		DEBUG("MEMORY: value was read from address %X!\n",address);
 		wb_value[WRITEBACK] = rd_val;
 		break;
 	case CMD_STORE:
@@ -327,7 +304,7 @@ PipeExectutionState mem_tick() {
 		// We use (value - 4) because the branch is calculated at EXECUTE stage,
 		// while we need pc at DECODE STAGE
 		pc = wb_value[MEMORY] - 4;
-		//DEBUG("MEMORY: branch taken to address 0x%X\n",pc);
+		DEBUG("MEMORY: branch taken to address 0x%X\n",pc);
 		break;
 	default:
 		// pass the value onward
@@ -383,6 +360,14 @@ void SIM_CoreClkTick() {
 */
 void SIM_CoreGetState(SIM_coreState *curState) {
 	curState->pc = pc;
+
+	// These don't actually have any meaning other 
+	// than to compare to the TA's output
+	SIM_cmd *current_command = &p_latch[FETCH].cmd;
+	p_latch[DECODE].src1Val = regFile[current_command->src1];
+	p_latch[DECODE].src2Val = (current_command->isSrc2Imm) ? current_command->src2 :
+		regFile[current_command->src2];
+
 	memcpy(curState->regFile, regFile, SIM_REGFILE_SIZE * sizeof(int32_t));
 	memcpy(curState->pipeStageState, p_latch, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
 	SIM_MemInstRead(pc, &curState->pipeStageState[FETCH].cmd);
