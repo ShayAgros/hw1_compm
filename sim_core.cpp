@@ -56,7 +56,8 @@ typedef enum {
 	ES_DELAY
 } PipeExectutionState;
 
-
+// global vars
+bool do_jump;
 int branch_compare;
 int pc;
 int regFile[SIM_REGFILE_SIZE];
@@ -272,6 +273,7 @@ PipeExectutionState exe_tick() {
 }
 
 PipeExectutionState mem_tick() {
+	do_jump = false;
     if (p_latch[MEMORY].cmd.opcode == CMD_NOP)
 		return ES_OKAY;
 
@@ -306,8 +308,11 @@ PipeExectutionState mem_tick() {
 		break;
 	case CMD_BR:
 	do_branch:
+		do_jump = true;
 		flush();
-		pc = wb_value[MEMORY];
+		// We use (value - 4) because the branch is calculated at EXECUTE stage,
+		// while we need pc at DECODE STAGE
+		pc = wb_value[MEMORY] - 4;
 		DEBUG("MEMORY: branch taken to address 0x%X\n",pc);
 		break;
 	default:
@@ -347,7 +352,7 @@ void SIM_CoreClkTick() {
     // we execute the pipe "from end to beginning"
     wb_tick();
 
-    if(mem_tick() == ES_DELAY)
+    if(mem_tick() == ES_DELAY | do_jump)
 	return;
 
     exe_tick();
