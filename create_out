@@ -10,6 +10,9 @@ diff -q ./tests_results/res_example2.img ./output/out2
 diff -q ./tests_results/res_example3.img ./output/out3
 ./sim_main ./tests/example4.img 20 > ./output/out4
 diff -q ./tests_results/res_example4.img ./output/out4
+
+# We will now create extra output files that have no comparison
+./sim_main ./tests/example5.img 20 > ./output/out5
 }
 
 function create_out2() {
@@ -22,18 +25,24 @@ diff -q ./tests_results/res_example2_split.img ./output/split2
 diff -q ./tests_results/res_example3_split.img ./output/split3
 ./sim_main ./tests/example4.img 20 -s > ./output/split4
 diff -q ./tests_results/res_example4_split.img ./output/split4
+
+# We will now create extra output files that have no comparison
+./sim_main ./tests/example5.img 20 -s > ./output/split5
 }
 
 function create_out3() {
 echo "Creating output files for forwarding case..."
 ./sim_main ./tests/example1.img 20 -f > ./output/forward1
-diff -s ./tests_results/res_example1_forwarding.img ./output/split1
+diff -s ./tests_results/res_example1_forwarding.img ./output/forward1
 ./sim_main ./tests/example2.img 20 -f > ./output/forward2
-diff -s ./tests_results/res_example1_forwarding.img ./output/split2
+diff -s ./tests_results/res_example1_forwarding.img ./output/forward2
 ./sim_main ./tests/example3.img 20 -f > ./output/forward3
-diff -s ./tests_results/res_example1_forwarding.img ./output/split3
+diff -s ./tests_results/res_example1_forwarding.img ./output/forward3
 ./sim_main ./tests/example4.img 20 -f > ./output/forward4
-diff -s ./tests_results/res_example1_forwarding.img ./output/split4
+diff -s ./tests_results/res_example1_forwarding.img ./output/forward4
+
+# We will now create extra output files that have no comparison
+./sim_main ./tests/example5.img 20 -f > ./output/forward5
 }
 
 create_out1

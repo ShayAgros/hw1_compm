@@ -5,8 +5,9 @@
 #include <string.h>
 
 #define WAIT_CYCLE -1
+#define AFTER_WB (WRITEBACK + 1)
 #define DEBUG( ... ); //printf( __VA_ARGS__ );
-#define DEBUG2( ... ); printf( __VA_ARGS__ );
+#define DEBUG2( ... ); //printf( __VA_ARGS__ );
 //#define DEBUG(msg,args...);
 
 // declarations
@@ -25,6 +26,7 @@ typedef enum {
 
 // global vars
 bool do_jump;
+int reg_split;
 int wb_reg;
 int branch_compare;
 int pc;
@@ -67,11 +69,8 @@ bool find_reg_in_latch(int reg, PipeStageState *latch) {
 // also, maybe there is a better way to implement this (though it does
 // need to know A LOT to have a good answer 
 
-// TODO: added some lines to the cases, but didn't check to see if it's
-// possible to improve switch layout.
-
 /* the function checks for data hazards */
-bool is_data_hazard(SIM_cmd *cmd, int split_reg) {
+bool is_data_hazard(SIM_cmd *cmd, int pre_reg) {
 
 	bool data_hazard = false;
 	pipeStage stage = EXECUTE;
@@ -109,22 +108,22 @@ bool is_data_hazard(SIM_cmd *cmd, int split_reg) {
 			data_hazard |= (i == WRITEBACK) ? (cmd->dst == wb_reg) : false;
 			data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
 		}
-		if (data_hazard)
-			DEBUG("\nFound hazard at stage %s", pipeStageStr[i]);
 		stage = (pipeStage)i;
+		if (data_hazard) {
+			DEBUG2("\nFound hazard at stage %s", pipeStageStr[stage]);
+		}		
 	}
 
 	// If the hazard came from WB, and the split_regfile already updated, 
 	// there is no need for a hazard.
-	DEBUG2("\nwb dst is %d\n", wb_reg);
-	DEBUG2("next wb_reg is %d\n", p_latch[WRITEBACK].cmd.dst);
-	DEBUG2("split_reg is %d\n", split_reg);
-	if (split_regfile && /*    */ && stage == (int)WRITEBACK
-		&& data_hazard){
+	DEBUG2("\nwb_reg is %d", wb_reg);
+	DEBUG2("\nreg_split is %d\n", reg_split);
+	// we check wb_reg > 0 because they might both get -1 in some cases.
+	if (split_regfile && (stage == (int)WRITEBACK) && (pre_reg == wb_reg) && (wb_reg > 0)){
 		data_hazard = false;
 		DEBUG2("Split_regfile canceled the hazard\n");
 	}
-	
+
     return data_hazard;
 }
 
@@ -239,9 +238,10 @@ PipeExectutionState decode_tick() {
 	    break;
 	// the rest of 'em
 	default:
-	    if (is_data_hazard(cmd,dst)) {
-		DEBUG("DECODE: data hazard detected\n");
-		return ES_DELAY;
+	    if (is_data_hazard(cmd,reg_split)) {
+			reg_split = dst;
+			DEBUG("DECODE: data hazard detected\n");
+			return ES_DELAY;
 	    }
 
 	    fetch_registers(cmd);
@@ -357,7 +357,7 @@ PipeExectutionState mem_tick() {
 }
 
 PipeExectutionState wb_tick() {
-	wb_reg = -1; // to prevent wierd hazard with r0
+	wb_reg = -1;
 	// TODO: is this cond really needed?
     if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
 		return ES_OKAY;
@@ -370,9 +370,10 @@ PipeExectutionState wb_tick() {
 	case CMD_SUBI:
 	case CMD_LOAD:
 	    dst = p_latch[WRITEBACK].cmd.dst;
-	    if (dst != 0)
+		if (dst != 0) {
 			regFile[dst] = wb_value[WRITEBACK];
-		wb_reg = dst;
+			wb_reg = dst;
+		}
 	}
 	set_nop_opcode(&p_latch[WRITEBACK]);
 	return ES_OKAY;
@@ -383,6 +384,7 @@ PipeExectutionState wb_tick() {
 */
 void SIM_CoreClkTick() {
     // we execute the pipe "from end to beginning"
+
     wb_tick();
 
 	do_stall = mem_tick();

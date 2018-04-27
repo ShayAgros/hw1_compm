@@ -23,10 +23,6 @@ Command at each pipe stage:
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
-wb dst is -1
-next wb_reg is 0
-split_reg is -1
-
 
 Simulation on cycle 2. The state is:
 PC = 0x8
@@ -38,10 +34,6 @@ Command at each pipe stage:
 	EXE : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
-
-wb dst is -1
-next wb_reg is 0
-split_reg is -1
 
 
 Simulation on cycle 3. The state is:
@@ -91,10 +83,6 @@ Command at each pipe stage:
 	MEM : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
-wb dst is -1
-next wb_reg is 1
-split_reg is -1
-
 
 Simulation on cycle 7. The state is:
 PC = 0xC
@@ -143,10 +131,6 @@ Command at each pipe stage:
 	MEM : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
-wb dst is -1
-next wb_reg is 2
-split_reg is -1
-
 
 Simulation on cycle 11. The state is:
 PC = 0xC
@@ -159,10 +143,6 @@ Command at each pipe stage:
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
 
-wb dst is 2
-next wb_reg is 0
-split_reg is -1
-
 
 Simulation on cycle 12. The state is:
 PC = 0xC
@@ -174,10 +154,6 @@ Command at each pipe stage:
 	EXE : NOP $0 , $0(=0x0) , $0(=0x0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
-
-wb dst is -1
-next wb_reg is 0
-split_reg is -1
 
 
 Simulation on cycle 13. The state is:
