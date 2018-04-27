@@ -2,40 +2,40 @@
 
 function create_out1() {
 echo "Creating output files for basic case..."
-./sim_main ./tests/example1.img 20 > ./curr_output/out1
-diff -s ./tests_results/res_example1.img ./curr_output/out1
-./sim_main ./tests/example2.img 20 > ./curr_output/out2
-diff -s ./tests_results/res_example2.img ./curr_output/out2
-./sim_main ./tests/example3.img 20 > ./curr_output/out3
-diff -s ./tests_results/res_example3.img ./curr_output/out3
-./sim_main ./tests/example4.img 20 > ./curr_output/out4
-diff -s ./tests_results/res_example4.img ./curr_output/out4
+./sim_main ./tests/example1.img 20 > ./output/out1
+diff -q ./tests_results/res_example1.img ./output/out1
+./sim_main ./tests/example2.img 20 > ./output/out2
+diff -q ./tests_results/res_example2.img ./output/out2
+./sim_main ./tests/example3.img 20 > ./output/out3
+diff -q ./tests_results/res_example3.img ./output/out3
+./sim_main ./tests/example4.img 20 > ./output/out4
+diff -q ./tests_results/res_example4.img ./output/out4
 }
 
 function create_out2() {
 echo "Creating output files for split-regfile case..."
-./sim_main ./tests/example1.img 20 > ./curr_output/split1
-diff -s ./tests_results/res_example1.img ./curr_output/split1
-./sim_main ./tests/example2.img 20 > ./curr_output/split2
-diff -s ./tests_results/res_example2.img ./curr_output/split2
-./sim_main ./tests/example3.img 20 > ./curr_output/split3
-diff -s ./tests_results/res_example3.img ./curr_output/split3
-./sim_main ./tests/example4.img 20 > ./curr_output/split4
-diff -s ./tests_results/res_example4.img ./curr_output/split4
+./sim_main ./tests/example1.img 20 -s > ./output/split1
+diff -q ./tests_results/res_example1_split.img ./output/split1
+./sim_main ./tests/example2.img 20 -s > ./output/split2
+diff -q ./tests_results/res_example2_split.img ./output/split2
+./sim_main ./tests/example3.img 20 -s > ./output/split3
+diff -q ./tests_results/res_example3_split.img ./output/split3
+./sim_main ./tests/example4.img 20 -s > ./output/split4
+diff -q ./tests_results/res_example4_split.img ./output/split4
 }
 
 function create_out3() {
 echo "Creating output files for forwarding case..."
-./sim_main ./tests/example1.img 20 > ./curr_output/forward1
-diff -s ./tests_results/res_example1.img ./curr_output/split1
-./sim_main ./tests/example2.img 20 > ./curr_output/forward2
-diff -s ./tests_results/res_example1.img ./curr_output/split2
-./sim_main ./tests/example3.img 20 > ./curr_output/forward3
-diff -s ./tests_results/res_example1.img ./curr_output/split3
-./sim_main ./tests/example4.img 20 > ./curr_output/forward4
-diff -s ./tests_results/res_example1.img ./curr_output/split4
+./sim_main ./tests/example1.img 20 -f > ./output/forward1
+diff -s ./tests_results/res_example1_forwarding.img ./output/split1
+./sim_main ./tests/example2.img 20 -f > ./output/forward2
+diff -s ./tests_results/res_example1_forwarding.img ./output/split2
+./sim_main ./tests/example3.img 20 -f > ./output/forward3
+diff -s ./tests_results/res_example1_forwarding.img ./output/split3
+./sim_main ./tests/example4.img 20 -f > ./output/forward4
+diff -s ./tests_results/res_example1_forwarding.img ./output/split4
 }
 
 create_out1
-#create_out2
+create_out2
 #create_out3

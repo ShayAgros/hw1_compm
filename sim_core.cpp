@@ -6,6 +6,7 @@
 
 #define WAIT_CYCLE -1
 #define DEBUG( ... ); //printf( __VA_ARGS__ );
+#define DEBUG2( ... ); printf( __VA_ARGS__ );
 //#define DEBUG(msg,args...);
 
 // declarations
@@ -14,7 +15,7 @@ void fetch_registers(SIM_cmd *cmd);
 void flush();
 bool is_data_hazard(SIM_cmd *cmd);
 void set_nop_opcode(PipeStageState *latch);
-bool find_reg_in_latch(int reg,PipeStageState &latch);
+bool find_reg_in_latch(int reg, PipeStageState &latch);
 
 // structs
 typedef enum {
@@ -28,36 +29,37 @@ int wb_reg;
 int branch_compare;
 int pc;
 int regFile[SIM_REGFILE_SIZE];
+PipeExectutionState do_stall = ES_OKAY;
 PipeStageState p_latch[SIM_PIPELINE_DEPTH];
 int32_t wb_value[SIM_PIPELINE_DEPTH];
 
 
 void flush() {
-    for (int i = 0; i <= EXECUTE; i++) {
-	set_nop_opcode(&p_latch[i]);
-    }
+	for (int i = 0; i <= EXECUTE; i++) {
+		set_nop_opcode(&p_latch[i]);
+	}
 }
 
 void set_nop_opcode(PipeStageState *latch) {
-	memset(latch , 0, sizeof(PipeStageState));
+	memset(latch, 0, sizeof(PipeStageState));
 }
 
 // Checks whether the given latch is going to change
 // this register (also verifies that the latch has
 // a command that modifies anything)
-bool find_reg_in_latch(int reg,PipeStageState *latch) {
-    bool hazard = false;
+bool find_reg_in_latch(int reg, PipeStageState *latch) {
+	bool hazard = false;
 
-    switch( latch->cmd.opcode ) {
-    case CMD_ADD:
-    case CMD_SUB:
-    case CMD_ADDI:
-    case CMD_SUBI:
-    case CMD_LOAD:
-	hazard |= (reg == latch->cmd.dst);
-	break;
-    }
-    return hazard;
+	switch (latch->cmd.opcode) {
+	case CMD_ADD:
+	case CMD_SUB:
+	case CMD_ADDI:
+	case CMD_SUBI:
+	case CMD_LOAD:
+		hazard |= (reg == latch->cmd.dst);
+		break;
+	}
+	return hazard;
 }
 
 // TODO: check if it wouldn't be better to run for EXECUTE
@@ -69,46 +71,60 @@ bool find_reg_in_latch(int reg,PipeStageState *latch) {
 // possible to improve switch layout.
 
 /* the function checks for data hazards */
-bool is_data_hazard(SIM_cmd *cmd) {
+bool is_data_hazard(SIM_cmd *cmd, int split_reg) {
 
-    SIM_cmd *exe;
-    bool data_hazard = false;
+	bool data_hazard = false;
+	pipeStage stage = EXECUTE;
 
-    for (int i=(int)EXECUTE; i<= (int)WRITEBACK && !data_hazard ;i++) {
-   	 switch (cmd->opcode) {
-   	     case CMD_ADD:
-   	     case CMD_ADDI:
-   	     case CMD_SUB:
-   	     case CMD_SUBI:
-   	     case CMD_LOAD:
-			 data_hazard |= (cmd->src1 == wb_reg);
-   	         data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
-		 if (!cmd->isSrc2Imm)
-			 data_hazard |= (cmd->src2 == wb_reg);
-		     data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
-   	         break;
-   	     case CMD_STORE:
-			 data_hazard |= (cmd->src1 == wb_reg);
-			 data_hazard |= (cmd->dst == wb_reg);
-   	         data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
-			 data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
-		 if (!cmd->isSrc2Imm)
-			 data_hazard |= (cmd->src2 == wb_reg);
-		     data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
-		 break;
-	     case CMD_BREQ:
-	     case CMD_BRNEQ:
-			 data_hazard |= (cmd->src1 == wb_reg);
-			 data_hazard |= (cmd->src2 == wb_reg);
-			 data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
-			 data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
-			 /* fall through */
-		 case CMD_BR:
-			 data_hazard |= (cmd->dst == wb_reg);
-			 data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
-	 }
-    }
+	for (int i = (int)EXECUTE; i <= (int)WRITEBACK && !data_hazard; i++) {
+		switch (cmd->opcode) {
+		case CMD_ADD:
+		case CMD_ADDI:
+		case CMD_SUB:
+		case CMD_SUBI:
+		case CMD_LOAD:
+			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
+			if (!cmd->isSrc2Imm)
+				data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+			break;
+		case CMD_STORE:
+			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
+			data_hazard |= (i == WRITEBACK) ? (cmd->dst == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
+			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
+			if (!cmd->isSrc2Imm)
+				data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+			break;
+		case CMD_BREQ:
+		case CMD_BRNEQ:
+			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
+			data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
+			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+			/* fall through */
+		case CMD_BR:
+			data_hazard |= (i == WRITEBACK) ? (cmd->dst == wb_reg) : false;
+			data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
+		}
+		if (data_hazard)
+			DEBUG("\nFound hazard at stage %s", pipeStageStr[i]);
+		stage = (pipeStage)i;
+	}
 
+	// If the hazard came from WB, and the split_regfile already updated, 
+	// there is no need for a hazard.
+	DEBUG2("\nwb dst is %d\n", wb_reg);
+	DEBUG2("next wb_reg is %d\n", p_latch[WRITEBACK].cmd.dst);
+	DEBUG2("split_reg is %d\n", split_reg);
+	if (split_regfile && /*    */ && stage == (int)WRITEBACK
+		&& data_hazard){
+		data_hazard = false;
+		DEBUG2("Split_regfile canceled the hazard\n");
+	}
+	
     return data_hazard;
 }
 
@@ -142,14 +158,14 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 // TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
-    p_latch[DECODE].src1Val = regFile[cmd->src1];
-    p_latch[DECODE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
+	p_latch[DECODE].src1Val = regFile[cmd->src1];
+	p_latch[DECODE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
 		regFile[cmd->src2];
-    wb_value[EXECUTE] = regFile[cmd->dst];
+	wb_value[EXECUTE] = regFile[cmd->dst];
 
-    DEBUG("DECODE: fetch values src1:0x%X src2:0x%X dst:%X\n",p_latch[DECODE].src1Val,
-	    						p_latch[DECODE].src2Val,
-							wb_value[EXECUTE]);
+	DEBUG("DECODE: fetch values src1:0x%X src2:0x%X dst:%X\n", p_latch[DECODE].src1Val,
+		p_latch[DECODE].src2Val,
+		wb_value[EXECUTE]);
 }
 
 /*! SIM_CoreReset: Reset the processor core simulator machine to start new simulation
@@ -171,7 +187,8 @@ int SIM_CoreReset(void) {
 }
 
 PipeExectutionState if_tick() {
-
+	if (do_stall == ES_DELAY || do_jump)
+		return ES_DELAY;
 	// TODO: those two lines contradict themselves
     SIM_cmd *current_command = &p_latch[FETCH].cmd;
     SIM_MemInstRead(pc,current_command);
@@ -191,9 +208,30 @@ PipeExectutionState if_tick() {
 // TODO: add support for forwarding here
 // 	and fix the bug you have here (register file isn't updated
 PipeExectutionState decode_tick() {
+
+	// If split_regfile is active we need to 'steal' the values from WB p_latch
+	// This should happen even with jumps and stalls.
+	int dst = -1;
+	if (split_regfile) {
+		SIM_cmd *cmd = &p_latch[WRITEBACK].cmd;
+		switch (cmd->opcode) {
+		case CMD_ADD:
+		case CMD_ADDI:
+		case CMD_SUB:
+		case CMD_SUBI:
+		case CMD_LOAD:
+			dst = p_latch[WRITEBACK].cmd.dst;
+			if (dst != 0) {
+				regFile[dst] = wb_value[WRITEBACK];
+			}
+		}
+	}
+
+	if (do_stall == ES_DELAY || do_jump)
+		return ES_DELAY;
     if (p_latch[DECODE].cmd.opcode == CMD_NOP)
 		return ES_OKAY;
-    SIM_cmd *cmd = &p_latch[DECODE].cmd;
+    SIM_cmd *cmd = &p_latch[DECODE].cmd; 
 
     switch(cmd->opcode) {
 	// commands that don't use registers
@@ -201,7 +239,7 @@ PipeExectutionState decode_tick() {
 	    break;
 	// the rest of 'em
 	default:
-	    if (is_data_hazard(cmd)) {
+	    if (is_data_hazard(cmd,dst)) {
 		DEBUG("DECODE: data hazard detected\n");
 		return ES_DELAY;
 	    }
@@ -217,6 +255,8 @@ PipeExectutionState decode_tick() {
 }
 
 PipeExectutionState exe_tick() {
+	if (do_stall == ES_DELAY || do_jump)
+		return ES_DELAY;
     if (p_latch[EXECUTE].cmd.opcode == CMD_NOP )
 		return ES_OKAY;
 
@@ -302,7 +342,7 @@ PipeExectutionState mem_tick() {
 		do_jump = true;
 		flush();
 		// We use (value - 4) because the branch is calculated at EXECUTE stage,
-		// while we need pc at DECODE STAGE
+		// while we need pc at the DECODE stage
 		pc = wb_value[MEMORY] - 4;
 		DEBUG("MEMORY: branch taken to address 0x%X\n",pc);
 		break;
@@ -311,12 +351,14 @@ PipeExectutionState mem_tick() {
 		wb_value[WRITEBACK] = wb_value[MEMORY];
 	}
     update_latch(&p_latch[WRITEBACK],&p_latch[MEMORY]);
+
 	set_nop_opcode(&p_latch[MEMORY]);
 	return ES_OKAY;
 }
 
 PipeExectutionState wb_tick() {
 	wb_reg = -1; // to prevent wierd hazard with r0
+	// TODO: is this cond really needed?
     if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
 		return ES_OKAY;
 	int dst;
@@ -329,7 +371,7 @@ PipeExectutionState wb_tick() {
 	case CMD_LOAD:
 	    dst = p_latch[WRITEBACK].cmd.dst;
 	    if (dst != 0)
-		regFile[dst] = wb_value[WRITEBACK];
+			regFile[dst] = wb_value[WRITEBACK];
 		wb_reg = dst;
 	}
 	set_nop_opcode(&p_latch[WRITEBACK]);
@@ -340,17 +382,15 @@ PipeExectutionState wb_tick() {
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-
     // we execute the pipe "from end to beginning"
     wb_tick();
 
-    if(mem_tick() == ES_DELAY | do_jump)
-		return;
+	do_stall = mem_tick();
 
     exe_tick();
 
-    if(decode_tick() == ES_DELAY)
-		return;
+	do_stall = decode_tick();
+
     if_tick();
 }
 
