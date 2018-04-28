@@ -24,6 +24,8 @@ Command at each pipe stage:
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 2. The state is:
 PC = 0x8
@@ -35,6 +37,8 @@ Command at each pipe stage:
 	EXE : ADDI $3 , $0(=0x0) , 4(=0x4)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
+
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 3. The state is:
@@ -48,6 +52,8 @@ Command at each pipe stage:
 	MEM : ADDI $3 , $0(=0x0) , 4(=0x4)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 4. The state is:
 PC = 0x10
@@ -59,6 +65,8 @@ Command at each pipe stage:
 	EXE : SUBI $7 , $0(=0x0) , 1(=0x1)
 	MEM : ADDI $4 , $0(=0x0) , 4(=0x4)
 	WB : ADDI $3 , $0(=0x0) , 4(=0x4)
+
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 5. The state is:

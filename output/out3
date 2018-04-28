@@ -131,6 +131,9 @@ Command at each pipe stage:
 	MEM : LOAD $3 , $0(=0x0) , 12968(=0x32A8)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage EXE
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 11. The state is:
 PC = 0x10
@@ -179,6 +182,9 @@ Command at each pipe stage:
 	MEM : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage MEM
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 15. The state is:
 PC = 0x10
@@ -190,6 +196,9 @@ Command at each pipe stage:
 	EXE : NOP $0 , $0(=0x0) , $0(=0x0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
+
+Found hazard at stage WB
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 16. The state is:
@@ -203,6 +212,8 @@ Command at each pipe stage:
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 17. The state is:
 PC = 0x14
@@ -214,6 +225,9 @@ Command at each pipe stage:
 	EXE : ADD $2 , $0(=0x0) , $1(=0x4)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
+
+Found hazard at stage EXE
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 18. The state is:
@@ -227,6 +241,9 @@ Command at each pipe stage:
 	MEM : ADD $2 , $0(=0x0) , $1(=0x4)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage MEM
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 19. The state is:
 PC = 0x14
@@ -238,6 +255,9 @@ Command at each pipe stage:
 	EXE : NOP $0 , $0(=0x0) , $0(=0x0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : ADD $2 , $0(=0x0) , $1(=0x4)
+
+Found hazard at stage WB
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 20. The state is:

@@ -7,7 +7,7 @@
 #define WAIT_CYCLE -1
 #define AFTER_WB (WRITEBACK + 1)
 #define DEBUG( ... ); //printf( __VA_ARGS__ );
-#define DEBUG2( ... ); //printf( __VA_ARGS__ );
+#define DEBUG2( ... ); printf( __VA_ARGS__ );
 //#define DEBUG(msg,args...);
 
 // declarations
@@ -91,15 +91,14 @@ bool is_data_hazard(SIM_cmd *cmd) {
 	int hazard_reg = -1;
 
 	/*
-	*****   COMMANDS WHEN STALL CANNOT BE AVOIDED *****
-	1.) LOAD at EXECUTE
+	*****   COMMANDS THAT CANNOT BE AVOIDED *****
+	--- LOAD at EXECUTE
 
 	*****   COMMANDS THAT SPLIT_REG CORRECTS *******
-	1.) Any command at WRITEBACK
+	--- Any command at WRITEBACK
 
 	*****   COMMANDS THAT FORWARD CORRECTS ******
-	1.) As far as I could find, anything else really...
-
+	--- As far as I could find, anything else really...
 	*/
 
 	// When we reach HDU, all information already passed 1 cycle.
@@ -132,19 +131,23 @@ bool is_data_hazard(SIM_cmd *cmd) {
 		stage = (pipeStage)i;
 		if (data_hazard) {
 			DEBUG2("\nFound hazard at stage %s", pipeStageStr[stage - 1]);
-			int hazard_reg = findHazardRegNum(cmd, stage);
-			DEBUG2("\nHazard reg is %d", hazard_reg);
 		}
 	}
 
 	// stage is (+1) because of implementation...
-	if (split_regfile && (stage == (int)AFTER_WB)) {
+	if (split_regfile && (stage == (int)AFTER_WB) && data_hazard) {
 		int hazard_reg = findHazardRegNum(cmd, stage);
+		DEBUG2("\nHazard reg is %d", hazard_reg);
 		DEBUG2("\nReg that was splited is %d", wb_value[AFTER_WB]);
 		if (hazard_reg == wb_value[AFTER_WB] && hazard_reg > 0) {
-			data_hazard = false;
 			DEBUG2("\nSplit_regfile canceled the hazard\n");
+			return false;			
 		}
+	}
+
+	if (forwarding && cmd->opcode != CMD_LOAD && data_hazard) {
+		DEBUG2("\nForwarding fixes the hazard.\n");
+		return false;
 	}
 
     return data_hazard;
@@ -165,6 +168,7 @@ int32_t do_plus(int32_t src1, int32_t src2) {
 }
 
 void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
+
 	int (*arithmetic_func)(int,int);
 
 	if(cmd->opcode == CMD_SUB || cmd->opcode == CMD_SUBI)
@@ -172,13 +176,12 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 	else
 		arithmetic_func = &do_plus;
 
-	wb_value[MEMORY] = arithmetic_func((int32_t)src1,src2);
+	wb_value[MEMORY] = arithmetic_func((int32_t)val1,val2);
 
 	DEBUG("EXECUTE:calculated value for register %d. Its new val will be %d."
 		" arguments: arg1:%d arg2:%d\n",cmd->dst,wb_value[MEMORY],src1,src2);
 }
 
-// TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
 
 	p_latch[DECODE].src1Val = regFile[cmd->src1];
@@ -203,8 +206,8 @@ void fetch_registers(SIM_cmd *cmd) {
 int SIM_CoreReset(void) {
     pc=0;
     memset(regFile, 0, SIM_REGFILE_SIZE * sizeof(int));
-    memset(wb_value, 0, SIM_PIPELINE_DEPTH * sizeof(int32_t));
-    memset(p_latch, 0, SIM_PIPELINE_DEPTH * sizeof(PipeStageState));
+    memset(wb_value, 0, (SIM_PIPELINE_DEPTH + 1) * sizeof(int32_t));
+    memset(p_latch, 0, (SIM_PIPELINE_DEPTH + 1) * sizeof(PipeStageState));
     branch_compare = 0;
     return 0;
 }
@@ -277,6 +280,16 @@ PipeExectutionState decode_tick() {
     return ES_OKAY;
 }
 
+void perform_forwarding() {
+	SIM_cmd *cmd = &p_latch[EXECUTE].cmd;
+
+	for (int i = WRITEBACK; i <= AFTER_WB; i++) {
+		if (find_reg_in_latch(cmd->src1, p_latch[i])) {
+			DEBUG2("Continue from here shai <3");
+		}
+	}
+}
+
 PipeExectutionState exe_tick() {
 	if (do_stall == ES_DELAY || do_jump)
 		return ES_DELAY;
@@ -288,31 +301,40 @@ PipeExectutionState exe_tick() {
 	int src1;
 	int32_t src2;
 
-	//TODO: possible addition for branch
-    switch(cmd->opcode) {
-	case CMD_ADD:
-	case CMD_SUB:
-	case CMD_ADDI:
-	case CMD_SUBI:
-	case CMD_LOAD:
-	    src1 = p_latch[EXECUTE].src1Val;
-	    src2 = p_latch[EXECUTE].src2Val;
-	    do_arithmetic(cmd, src1, src2);
-	    break;
-	case CMD_STORE:
-		src1 = wb_value[EXECUTE];
-		src2 = p_latch[EXECUTE].src2Val;
-		do_arithmetic(cmd, src1, src2);
-		break;
-	case CMD_BREQ:
-	case CMD_BRNEQ:
-		branch_compare = p_latch[EXECUTE].src1Val - p_latch[EXECUTE].src2Val;
-	case CMD_BR:
-		wb_value[MEMORY] = pc + wb_value[EXECUTE];
-    }
+	// I seperated forwarding to another func to keep the exec_tick short and readable.
+	// Not quite sure if this is the best implementation though.
+	// I prefere not to mess with the switch too much.
+	// Creating a new one felt like the most comfortable thing to do.
+	if (forwarding) {
+		perform_forwarding();
+	} else {
+		//TODO: possible addition for branch
+		switch (cmd->opcode) {
+		case CMD_ADD:
+		case CMD_SUB:
+		case CMD_ADDI:
+		case CMD_SUBI:
+		case CMD_LOAD:
+			src1 = p_latch[EXECUTE].src1Val;
+			src2 = p_latch[EXECUTE].src2Val;
+			do_arithmetic(cmd, src1, src2);
+			break;
+		case CMD_STORE:
+			src1 = wb_value[EXECUTE];
+			src2 = p_latch[EXECUTE].src2Val;
+			do_arithmetic(cmd, src1, src2);
+			break;
+		case CMD_BREQ:
+		case CMD_BRNEQ:
+			branch_compare = p_latch[EXECUTE].src1Val - p_latch[EXECUTE].src2Val;
+		case CMD_BR:
+			wb_value[MEMORY] = pc + wb_value[EXECUTE];
+			break;
+		}
+	}
 
     update_latch(&p_latch[MEMORY],&p_latch[EXECUTE]);
-    /* we zero to command to in case of stall */
+    /* we zero command in case of stall */
     set_nop_opcode(&p_latch[EXECUTE]);
     return ES_OKAY;
 }

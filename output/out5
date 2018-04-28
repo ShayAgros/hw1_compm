@@ -83,6 +83,7 @@ Command at each pipe stage:
 	MEM : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage MEM
 
 Simulation on cycle 7. The state is:
 PC = 0xC
@@ -191,6 +192,9 @@ Command at each pipe stage:
 	MEM : LOAD $3 , $1(=0x4) , 12964(=0x32A4)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage MEM
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 16. The state is:
 PC = 0x14
@@ -203,6 +207,9 @@ Command at each pipe stage:
 	MEM : LOAD $17 , $0(=0x0) , $0(=0x0)
 	WB : LOAD $3 , $1(=0x4) , 12964(=0x32A4)
 
+Found hazard at stage WB
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 17. The state is:
 PC = 0x14
@@ -214,6 +221,8 @@ Command at each pipe stage:
 	EXE : NOP $0 , $0(=0x0) , $0(=0x0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : LOAD $17 , $0(=0x0) , $0(=0x0)
+
+Forwarding can fix the hazard.
 
 
 Simulation on cycle 18. The state is:

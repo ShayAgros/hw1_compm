@@ -84,6 +84,9 @@ Command at each pipe stage:
 	MEM : LOAD $1 , $0(=0x0) , 12960(=0x32A0)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage EXE
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 7. The state is:
 PC = 0xC
@@ -132,6 +135,9 @@ Command at each pipe stage:
 	MEM : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
 	WB : NOP $0 , $0(=0x0) , $0(=0x0)
 
+Found hazard at stage MEM
+Forwarding can fix the hazard.
+
 
 Simulation on cycle 11. The state is:
 PC = 0xC
@@ -143,6 +149,11 @@ Command at each pipe stage:
 	EXE : NOP $0 , $0(=0x0) , $0(=0x0)
 	MEM : NOP $0 , $0(=0x0) , $0(=0x0)
 	WB : LOAD $2 , $0(=0x0) , 12964(=0x32A4)
+
+Found hazard at stage WB
+Hazard reg is 2
+Reg that was splited is 2
+Split_regfile canceled the hazard
 
 
 Simulation on cycle 12. The state is:
