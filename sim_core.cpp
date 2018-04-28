@@ -26,14 +26,14 @@ typedef enum {
 
 // global vars
 bool do_jump;
-int reg_split;
-int wb_reg;
 int branch_compare;
 int pc;
 int regFile[SIM_REGFILE_SIZE];
 PipeExectutionState do_stall = ES_OKAY;
-PipeStageState p_latch[SIM_PIPELINE_DEPTH];
-int32_t wb_value[SIM_PIPELINE_DEPTH];
+// We add an extra stage becuase when we reach decode we need
+// information that WB no longer has.
+PipeStageState p_latch[SIM_PIPELINE_DEPTH + 1];
+int32_t wb_value[SIM_PIPELINE_DEPTH + 1];
 
 
 void flush() {
@@ -64,64 +64,87 @@ bool find_reg_in_latch(int reg, PipeStageState *latch) {
 	return hazard;
 }
 
+// We want to know if src1 or src2 causes the hazard
+// note : stage is +1 right now, because at this point all 
+// commands passed 1 cycle already
+int findHazardRegNum(SIM_cmd* cmd, pipeStage stage) {
+	if (cmd->src1 == p_latch[stage].cmd.dst)
+		return cmd->src1;
+	if (!(cmd->isSrc2Imm) && (cmd->src2 == p_latch[stage].cmd.dst))
+		return cmd->src2;
+	if (cmd->dst == p_latch[stage].cmd.dst)
+		return cmd->dst;
+	return -1; // shouln't happen
+}
+
+
 // TODO: check if it wouldn't be better to run for EXECUTE
 // to WRITEBACK (in case of forwarding, you need the newest value)
 // also, maybe there is a better way to implement this (though it does
 // need to know A LOT to have a good answer 
 
 /* the function checks for data hazards */
-bool is_data_hazard(SIM_cmd *cmd, int pre_reg) {
+bool is_data_hazard(SIM_cmd *cmd) {
 
 	bool data_hazard = false;
-	pipeStage stage = EXECUTE;
+	pipeStage stage = MEMORY;
+	int hazard_reg = -1;
 
-	for (int i = (int)EXECUTE; i <= (int)WRITEBACK && !data_hazard; i++) {
+	/*
+	*****   COMMANDS WHEN STALL CANNOT BE AVOIDED *****
+	1.) LOAD at EXECUTE
+
+	*****   COMMANDS THAT SPLIT_REG CORRECTS *******
+	1.) Any command at WRITEBACK
+
+	*****   COMMANDS THAT FORWARD CORRECTS ******
+	1.) As far as I could find, anything else really...
+
+	*/
+
+	// When we reach HDU, all information already passed 1 cycle.
+	for (int i = (int)MEMORY; i <= (int)AFTER_WB && !data_hazard; i++) {
 		switch (cmd->opcode) {
 		case CMD_ADD:
 		case CMD_ADDI:
 		case CMD_SUB:
 		case CMD_SUBI:
 		case CMD_LOAD:
-			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
 			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
 			if (!cmd->isSrc2Imm)
-				data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
-			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+				data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
 			break;
 		case CMD_STORE:
-			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
-			data_hazard |= (i == WRITEBACK) ? (cmd->dst == wb_reg) : false;
 			data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
 			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
 			if (!cmd->isSrc2Imm)
-				data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
-			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
+				data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
 			break;
 		case CMD_BREQ:
 		case CMD_BRNEQ:
-			data_hazard |= (i == WRITEBACK) ? (cmd->src1 == wb_reg) : false;
-			data_hazard |= (i == WRITEBACK) ? (cmd->src2 == wb_reg) : false;
 			data_hazard |= find_reg_in_latch(cmd->src1, &p_latch[i]);
 			data_hazard |= find_reg_in_latch(cmd->src2, &p_latch[i]);
 			/* fall through */
 		case CMD_BR:
-			data_hazard |= (i == WRITEBACK) ? (cmd->dst == wb_reg) : false;
 			data_hazard |= find_reg_in_latch(cmd->dst, &p_latch[i]);
 		}
+
 		stage = (pipeStage)i;
 		if (data_hazard) {
-			DEBUG2("\nFound hazard at stage %s", pipeStageStr[stage]);
-		}		
+			DEBUG2("\nFound hazard at stage %s", pipeStageStr[stage - 1]);
+			int hazard_reg = findHazardRegNum(cmd, stage);
+			DEBUG2("\nHazard reg is %d", hazard_reg);
+		}
 	}
 
-	// If the hazard came from WB, and the split_regfile already updated, 
-	// there is no need for a hazard.
-	DEBUG2("\nwb_reg is %d", wb_reg);
-	DEBUG2("\nreg_split is %d\n", reg_split);
-	// we check wb_reg > 0 because they might both get -1 in some cases.
-	if (split_regfile && (stage == (int)WRITEBACK) && (pre_reg == wb_reg) && (wb_reg > 0)){
-		data_hazard = false;
-		DEBUG2("Split_regfile canceled the hazard\n");
+	// stage is (+1) because of implementation...
+	if (split_regfile && (stage == (int)AFTER_WB)) {
+		int hazard_reg = findHazardRegNum(cmd, stage);
+		DEBUG2("\nReg that was splited is %d", wb_value[AFTER_WB]);
+		if (hazard_reg == wb_value[AFTER_WB] && hazard_reg > 0) {
+			data_hazard = false;
+			DEBUG2("\nSplit_regfile canceled the hazard\n");
+		}
 	}
 
     return data_hazard;
@@ -157,6 +180,7 @@ void do_arithmetic(SIM_cmd *cmd,int src1,int32_t src2) {
 
 // TODO 1) add forwarding support
 void fetch_registers(SIM_cmd *cmd) {
+
 	p_latch[DECODE].src1Val = regFile[cmd->src1];
 	p_latch[DECODE].src2Val = (cmd->isSrc2Imm) ? cmd->src2 :
 		regFile[cmd->src2];
@@ -238,8 +262,7 @@ PipeExectutionState decode_tick() {
 	    break;
 	// the rest of 'em
 	default:
-	    if (is_data_hazard(cmd,reg_split)) {
-			reg_split = dst;
+	    if (is_data_hazard(cmd)) {
 			DEBUG("DECODE: data hazard detected\n");
 			return ES_DELAY;
 	    }
@@ -357,11 +380,8 @@ PipeExectutionState mem_tick() {
 }
 
 PipeExectutionState wb_tick() {
-	wb_reg = -1;
-	// TODO: is this cond really needed?
-    if (p_latch[WRITEBACK].cmd.opcode == CMD_NOP)
-		return ES_OKAY;
-	int dst;
+
+	int dst = -1;
 	SIM_cmd *cmd = &p_latch[WRITEBACK].cmd;
 	switch(cmd->opcode) {
 	case CMD_ADD:
@@ -372,9 +392,12 @@ PipeExectutionState wb_tick() {
 	    dst = p_latch[WRITEBACK].cmd.dst;
 		if (dst != 0) {
 			regFile[dst] = wb_value[WRITEBACK];
-			wb_reg = dst;
 		}
 	}
+
+	wb_value[AFTER_WB] = dst;
+	update_latch(&p_latch[AFTER_WB], &p_latch[WRITEBACK]);
+
 	set_nop_opcode(&p_latch[WRITEBACK]);
 	return ES_OKAY;
 }
