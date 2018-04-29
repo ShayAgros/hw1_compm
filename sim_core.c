@@ -8,14 +8,13 @@
 #define AFTER_WB (WRITEBACK + 1)
 #define DEBUG( ... );  //printf( __VA_ARGS__ );
 #define DEBUG2( ... ); //printf( __VA_ARGS__ );
-
 // declarations
-void update_latch(SIM_cmd *cmd, pipeStage *state);
+void update_latch(PipeStageState *dst_latch,PipeStageState *src_latch);
 void fetch_registers(SIM_cmd *cmd);
 void flush();
 bool is_data_hazard(SIM_cmd *cmd);
 void set_nop_opcode(PipeStageState *latch);
-bool find_reg_in_latch(int reg, PipeStageState &latch);
+bool find_reg_in_latch(int reg, PipeStageState *latch);
 void update_src_regs_w_split_regs(SIM_cmd *cmd,int reg_val);
 int is_contained_in_latch(PipeStageState *state,int reg_num);
 void find_reg_and_replace(int reg_num,int *reg_val, pipeStage stage);
@@ -48,8 +47,6 @@ void set_nop_opcode(PipeStageState *latch) {
 
 void update_src_regs_w_split_regs(SIM_cmd *cmd,int reg_val) {
 
-    	int dst_reg = cmd->dst;
-
 	switch(cmd->opcode) {
 	case CMD_ADD:
 	case CMD_ADDI:
@@ -72,7 +69,7 @@ bool find_reg_in_latch(int reg, PipeStageState *latch) {
 	case CMD_ADDI:
 	case CMD_SUBI:
 	case CMD_LOAD:
-		hazard |= (reg == latch->cmd.dst);
+		hazard |= (reg!=0 && reg == latch->cmd.dst);
 		break;
 	}
 	return hazard;
@@ -82,7 +79,6 @@ bool find_reg_in_latch(int reg, PipeStageState *latch) {
 bool is_data_hazard(SIM_cmd *cmd) {
 
 	bool data_hazard = false;
-	int hazard_reg = -1;
 	int stage;
 
 	/*
